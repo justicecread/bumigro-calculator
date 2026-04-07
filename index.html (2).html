@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>būmigro Cost Estimator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { zoom: 1.25; }
+    body { background: #88674F; font-family: 'Barlow', sans-serif; }
+    select option { background: #6B5040; color: #F5EDE0; }
+    .bumi-input::placeholder { color: #F5EDE0!important; opacity: 1; }
+    input::-webkit-inner-spin-button, input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    select { appearance: auto; }
+    #loading { display:flex; align-items:center; justify-content:center; height:100vh; font-family:'Bungee',cursive; font-size:18px; color:#A2D45E; letter-spacing:0.1em; }
+    #error { display:none; padding:20px; color:#E07060; font-family:monospace; background:#5A4133; margin:20px; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <div id="loading">LOADING ESTIMATOR...</div>
+  <div id="error"></div>
+  <div id="root"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      document.getElementById('loading').style.display = 'none';
+      var e = document.getElementById('error');
+      e.style.display = 'block';
+      e.textContent = 'Error: ' + msg + ' (line ' + line + ')';
+    };
+    emailjs.init("FEx1AhfaB7UBPjoJi");
+  </script>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useMemo, useEffect } = React;
+
+const TIERS = [
+  { label: "MSRP",                 short: "MSRP",    threshold: 0   },
+  { label: "10% off — 10+ rolls",  short: "10% OFF", threshold: 10  },
+  { label: "20% off — 50+ rolls",  short: "20% OFF", threshold: 50  },
+  { label: "30% off — 100+ rolls", short: "30% OFF", threshold: 100 },
+];
+function getTierIdx(qty) {
+  if (qty >= 100) return 3;
+  if (qty >= 50)  return 2;
+  if (qty >= 10)  return 1;
+  return 0;
+}
+const fmt  = n => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+const fmtN = (n, d = 3) => "$" + (n || 0).toFixed(d);
+
+const B     = "#88674F";
+const BD    = "#6B5040";
+const BDD   = "#5A4133";
+const BL    = "#9E7B63";
+const GR    = "#A2D45E";
+const CREAM = "#F5EDE0";
+const MID   = "#D4B898";
+const DIM   = "#A88870";
+const H     = "'Bungee', cursive";
+const HB    = "'Barlow', sans-serif";
+
+const DEFAULT_PRODUCTS = [
+  // 36" x 4000' — 0.5 mil
+  { sku:"GRO-MF-36.4K.05-BLK-4M",  width:36, length:4000, thick:"0.5", dur:"4",  color:"Black", p:[235.00,211.50,188.00,164.50], ft:[0.059,0.053,0.047,0.041], lb:[4.44,4.00,3.55,3.11], kg:[9.79,8.81,7.83,6.85] },
+  { sku:"GRO-MF-36.4K.05-BLK-8M",  width:36, length:4000, thick:"0.5", dur:"8",  color:"Black", p:[235.00,211.50,188.00,164.50], ft:[0.059,0.053,0.047,0.041], lb:[4.44,4.00,3.55,3.11], kg:[9.79,8.81,7.83,6.85] },
+  { sku:"GRO-MF-36.4K.05-BLK-12M", width:36, length:4000, thick:"0.5", dur:"12", color:"Black", p:[235.00,211.50,188.00,164.50], ft:[0.059,0.053,0.047,0.041], lb:[4.44,4.00,3.55,3.11], kg:[9.79,8.81,7.83,6.85] },
+  // 36" x 4000' — 0.7 mil
+  { sku:"GRO-MF-36.4K.07-BLK-4M",  width:36, length:4000, thick:"0.7", dur:"4",  color:"Black", p:[300.00,270.00,240.00,210.00], ft:[0.075,0.068,0.060,0.053], lb:[3.86,3.48,3.09,2.70], kg:[8.52,7.66,6.81,5.96] },
+  { sku:"GRO-MF-36.4K.07-BLK-8M",  width:36, length:4000, thick:"0.7", dur:"8",  color:"Black", p:[320.00,288.00,256.00,224.00], ft:[0.080,0.072,0.064,0.056], lb:[4.12,3.71,3.30,2.88], kg:[9.08,8.17,7.27,6.36] },
+  { sku:"GRO-MF-36.4K.07-BLK-12M", width:36, length:4000, thick:"0.7", dur:"12", color:"Black", p:[320.00,288.00,256.00,224.00], ft:[0.080,0.072,0.064,0.056], lb:[4.12,3.71,3.30,2.88], kg:[9.08,8.17,7.27,6.36] },
+  // 48" x 4000' — 0.5 mil
+  { sku:"GRO-MF-48.4K.05-BLK-4M",  width:48, length:4000, thick:"0.5", dur:"4",  color:"Black", p:[300.00,270.00,240.00,210.00], ft:[0.075,0.068,0.060,0.053], lb:[4.35,3.91,3.48,3.04], kg:[9.58,8.63,7.67,6.71] },
+  { sku:"GRO-MF-48.4K.05-BLK-8M",  width:48, length:4000, thick:"0.5", dur:"8",  color:"Black", p:[300.00,270.00,240.00,210.00], ft:[0.075,0.068,0.060,0.053], lb:[4.35,3.91,3.48,3.04], kg:[9.58,8.63,7.67,6.71] },
+  { sku:"GRO-MF-48.4K.05-BLK-12M", width:48, length:4000, thick:"0.5", dur:"12", color:"Black", p:[300.00,270.00,240.00,210.00], ft:[0.075,0.068,0.060,0.053], lb:[4.35,3.91,3.48,3.04], kg:[9.58,8.63,7.67,6.71] },
+  // 48" x 4000' — 0.7 mil
+  { sku:"GRO-MF-48.4K.07-BLK-4M",  width:48, length:4000, thick:"0.7", dur:"4",  color:"Black", p:[423.00,380.70,338.40,296.10], ft:[0.106,0.095,0.085,0.074], lb:[4.23,3.81,3.39,2.96], kg:[9.34,8.40,7.47,6.53] },
+  { sku:"GRO-MF-48.4K.07-BLK-8M",  width:48, length:4000, thick:"0.7", dur:"8",  color:"Black", p:[423.00,380.70,338.40,296.10], ft:[0.106,0.095,0.085,0.074], lb:[4.23,3.81,3.39,2.96], kg:[9.34,8.40,7.47,6.53] },
+  { sku:"GRO-MF-48.4K.07-BLK-12M", width:48, length:4000, thick:"0.7", dur:"12", color:"Black", p:[423.00,380.70,338.40,296.10], ft:[0.106,0.095,0.085,0.074], lb:[4.23,3.81,3.39,2.96], kg:[9.34,8.40,7.47,6.53] },
+  // 48" x 4000' — 1.0 mil
+  { sku:"GRO-MF-48.4K.10-BLK-4M",  width:48, length:4000, thick:"1.0", dur:"4",  color:"Black", p:[597.00,537.30,477.60,417.90], ft:[0.149,0.134,0.119,0.104], lb:[7.73,6.95,6.18,5.41], kg:[17.03,15.33,13.63,11.92] },
+  { sku:"GRO-MF-48.4K.10-BLK-8M",  width:48, length:4000, thick:"1.0", dur:"8",  color:"Black", p:[597.00,537.30,477.60,417.90], ft:[0.149,0.134,0.119,0.104], lb:[7.73,6.95,6.18,5.41], kg:[17.03,15.33,13.63,11.92] },
+  { sku:"GRO-MF-48.4K.10-BLK-12M", width:48, length:4000, thick:"1.0", dur:"12", color:"Black", p:[597.00,537.30,477.60,417.90], ft:[0.149,0.134,0.119,0.104], lb:[7.73,6.95,6.18,5.41], kg:[17.03,15.33,13.63,11.92] },
+  // 60" x 4000' — 0.5 mil
+  { sku:"GRO-MF-60.4K.05-BLK-4M",  width:60, length:4000, thick:"0.5", dur:"4",  color:"Black", p:[352.00,316.80,281.60,246.40], ft:[0.088,0.079,0.070,0.062], lb:[4.72,4.25,3.78,3.31], kg:[10.41,9.37,8.33,7.29] },
+  { sku:"GRO-MF-60.4K.05-BLK-8M",  width:60, length:4000, thick:"0.5", dur:"8",  color:"Black", p:[445.00,400.50,356.00,311.50], ft:[0.111,0.100,0.089,0.078], lb:[5.97,5.37,4.78,4.18], kg:[13.16,11.85,10.53,9.21] },
+  { sku:"GRO-MF-60.4K.05-BLK-12M", width:60, length:4000, thick:"0.5", dur:"12", color:"Black", p:[445.00,400.50,356.00,311.50], ft:[0.111,0.100,0.089,0.078], lb:[5.97,5.37,4.78,4.18], kg:[13.16,11.85,10.53,9.21] },
+  // 60" x 4000' — 0.7 mil
+  { sku:"GRO-MF-60.4K.07-BLK-4M",  width:60, length:4000, thick:"0.7", dur:"4",  color:"Black", p:[522.00,469.80,417.60,365.40], ft:[0.131,0.117,0.104,0.091], lb:[4.09,3.68,3.27,2.86], kg:[9.02,8.12,7.21,6.31] },
+  { sku:"GRO-MF-60.4K.07-BLK-8M",  width:60, length:4000, thick:"0.7", dur:"8",  color:"Black", p:[522.00,469.80,417.60,365.40], ft:[0.131,0.117,0.104,0.091], lb:[4.09,3.68,3.27,2.86], kg:[9.02,8.12,7.21,6.31] },
+  { sku:"GRO-MF-60.4K.07-BLK-12M", width:60, length:4000, thick:"0.7", dur:"12", color:"Black", p:[522.00,469.80,417.60,365.40], ft:[0.131,0.117,0.104,0.091], lb:[4.09,3.68,3.27,2.86], kg:[9.02,8.12,7.21,6.31] },
+  // 60" x 4000' — 1.0 mil
+  { sku:"GRO-MF-60.4K.10-BLK-4M",  width:60, length:4000, thick:"1.0", dur:"4",  color:"Black", p:[739.00,665.10,591.20,517.30], ft:[0.185,0.166,0.148,0.129], lb:[4.09,3.68,3.27,2.86], kg:[9.02,8.12,7.22,6.31] },
+  { sku:"GRO-MF-60.4K.10-BLK-8M",  width:60, length:4000, thick:"1.0", dur:"8",  color:"Black", p:[739.00,665.10,591.20,517.30], ft:[0.185,0.166,0.148,0.129], lb:[4.09,3.68,3.27,2.86], kg:[9.02,8.12,7.22,6.31] },
+  { sku:"GRO-MF-60.4K.10-BLK-12M", width:60, length:4000, thick:"1.0", dur:"12", color:"Black", p:[739.00,665.10,591.20,517.30], ft:[0.185,0.166,0.148,0.129], lb:[4.09,3.68,3.27,2.86], kg:[9.02,8.12,7.22,6.31] },
+];
+
+const card     = { background:BD, borderRadius:10, border:`1px solid ${BDD}`, padding:"20px" };
+const inpStyle = { padding:"9px 12px", borderRadius:6, border:`1px solid ${BDD}`, background:BL, color:CREAM, fontSize:13, width:"100%", fontFamily:HB, outline:"none", boxSizing:"border-box" };
+const lbl      = { fontSize:12, color:MID, marginBottom:4, display:"block", fontFamily:H, letterSpacing:"0.04em" };
+const gBtn     = { padding:"9px 18px", borderRadius:6, cursor:"pointer", border:"none", background:GR, color:"#2A3A10", fontFamily:H, fontSize:13, letterSpacing:"0.03em" };
+const oBtn     = { padding:"9px 18px", borderRadius:6, cursor:"pointer", border:`1px solid ${BDD}`, background:"transparent", color:MID, fontFamily:H, fontSize:13, letterSpacing:"0.03em" };
+
+function BumigroCalculator({ adminMode = true }) {
+  const [products, setProducts] = useState(DEFAULT_PRODUCTS);
+  const [tab, setTab]           = useState("calc");
+  const [editMode, setEditMode]     = useState(false);
+  const [editData, setEditData]     = useState(null);
+  const [sheetUrl, setSheetUrl]     = useState("");
+  const [csvPaste, setCsvPaste]     = useState("");
+  const [syncMode, setSyncMode]     = useState("url");
+  const [syncStatus, setSyncStatus] = useState(null);
+  const [syncMsg, setSyncMsg]       = useState("");
+  const [selWidth, setSelWidth] = useState("");
+  const [selLength, setSelLength] = useState("");
+  const [selThick, setSelThick]   = useState("");
+  const [selDur, setSelDur]       = useState("");
+  const [selColor, setSelColor]   = useState("");
+  const [qty, setQty]             = useState(1);
+  const [showComparison, setShowComparison] = useState(false);
+  const [convMulchCost, setConvMulchCost]   = useState("");
+  const [convLaborHrs, setConvLaborHrs]     = useState("");
+  const [convLaborRate, setConvLaborRate]   = useState("");
+  const [convDisposal, setConvDisposal]     = useState("");
+  const [compCalculated, setCompCalculated] = useState(false);
+  const [showModal, setShowModal]           = useState(false);
+  const [modalName, setModalName]           = useState("");
+  const [modalEmail, setModalEmail]         = useState("");
+  const [modalPhone, setModalPhone]         = useState("");
+
+  useEffect(() => {
+    const l = document.createElement("link");
+    l.rel  = "stylesheet";
+    l.href = "https://fonts.googleapis.com/css2?family=Bungee&family=Barlow:wght@300;400;500;600&display=swap";
+    document.head.appendChild(l);
+    const s = document.createElement("style");
+    s.textContent = `.bumi-input::placeholder { color: #F5EDE0; opacity: 1; }`;
+    document.head.appendChild(s);
+  }, []);
+
+  // If tab is "prices" but adminMode is off, fall back to calc
+  useEffect(() => {
+    if (!adminMode && tab === "prices") setTab("calc");
+  }, [adminMode]);
+
+  const widths  = useMemo(() => [...new Set(products.map(p => p.width))].sort((a,b) => a-b), [products]);
+  const lengths = useMemo(() => {
+    const f = products.filter(p => !selWidth || p.width === Number(selWidth));
+    return [...new Set(f.map(p => p.length))].sort((a,b) => a-b);
+  }, [products, selWidth]);
+  const thicks = useMemo(() => {
+    const f = products.filter(p => (!selWidth||p.width===Number(selWidth)) && (!selLength||p.length===Number(selLength)));
+    return [...new Set(f.map(p => p.thick))].sort((a,b) => Number(a)-Number(b));
+  }, [products, selWidth, selLength]);
+  const durs = ["4", "8", "12"];
+  const colors = useMemo(() => {
+    const f = products.filter(p => (!selWidth||p.width===Number(selWidth)) && (!selLength||p.length===Number(selLength)) && (!selThick||p.thick===selThick) && (!selDur||p.dur===selDur));
+    return [...new Set(f.map(p => p.color))];
+  }, [products, selWidth, selLength, selThick, selDur]);
+
+  const handleSelect = (level, value) => {
+    const w = level===0 ? value : selWidth;
+    const byW = p => !w || p.width === Number(w);
+
+    const l = "4000";
+
+    let t = level===2 ? value : selThick;
+    const vT = [...new Set(products.filter(p => byW(p) && p.length===4000).map(p => p.thick))].sort((a,b) => Number(a)-Number(b));
+    if (!vT.includes(t)) t = level===2 ? value : "";
+
+    let d = level===3 ? value : selDur;
+    const vD = [...new Set(products.filter(p => byW(p) && p.length===4000 && (!t||p.thick===t)).map(p => p.dur))].sort((a,b) => Number(a)-Number(b));
+    if (!vD.includes(d)) d = level===3 ? value : "";
+
+    setSelWidth(w); setSelLength(l); setSelThick(t); setSelDur(d); setSelColor("");
+  };
+
+  const product   = useMemo(() => products.find(p => p.width===Number(selWidth) && (!selLength||p.length===Number(selLength)) && (!selThick||p.thick===selThick) && (!selDur||p.dur===selDur) && (!selColor||p.color===selColor)), [products, selWidth, selLength, selThick, selDur, selColor]);
+  const tierIdx   = getTierIdx(qty);
+  const unitPrice = product?.p[tierIdx] || 0;
+  const total     = unitPrice * qty;
+  const savings   = product ? (product.p[0] - unitPrice) * qty : 0;
+  const nextT     = TIERS.slice(tierIdx+1).find(t => t.threshold > 0);
+
+  const startEdit  = () => { setEditData(JSON.parse(JSON.stringify(products))); setEditMode(true); };
+  const saveEdit   = () => { setProducts(editData); setEditMode(false); setEditData(null); };
+  const cancelEdit = () => { setEditMode(false); setEditData(null); };
+  const cellEdit   = (sku, field, ti, v) => setEditData(prev => prev.map(p => {
+    if (p.sku !== sku) return p;
+    const a = [...p[field]]; a[ti] = parseFloat(v) || 0; return {...p, [field]: a};
+  }));
+
+  const pp = v => parseFloat(String(v || "").replace(/[$,]/g, "")) || 0;
+
+  function parseCSV(text) {
+    const rows = text.split(/\r?\n/).map(r => {
+      const cells = []; let inQ = false, cur = "";
+      for (const ch of r) {
+        if (ch === '"') inQ = !inQ;
+        else if (ch === "," && !inQ) { cells.push(cur.trim()); cur = ""; }
+        else cur += ch;
+      }
+      cells.push(cur.trim()); return cells;
+    });
+    const products = [];
+    for (let i = 0; i < rows.length - 1; i++) {
+      const r = rows[i];
+      if (r.some(c => c === "SKU") && r.some(c => c.includes("MSRP"))) {
+        for (let j = i + 1; j < rows.length; j++) {
+          const row = rows[j];
+          const sku = (row[1] || "").trim();
+          if (!sku) break;
+          const [wStr, lStr] = (row[2] || "").trim().split("x");
+          products.push({
+            sku, width: parseInt(wStr)||0, length: parseInt(lStr)||0,
+            thick: (row[3]||"").replace(/\s*mil\s*/i,"").trim(),
+            dur:   (row[4]||"").replace(/\s*months?\s*/i,"").trim(),
+            color: sku.includes("WHT") ? "White" : "Black",
+            p:  [pp(row[5]),pp(row[9]),pp(row[13]),pp(row[17])],
+            ft: [pp(row[6]),pp(row[10]),pp(row[14]),pp(row[18])],
+            lb: [pp(row[7]),pp(row[11]),pp(row[15]),pp(row[19])],
+            kg: [pp(row[8]),pp(row[12]),pp(row[16]),pp(row[20])],
+          });
+        }
+        break;
+      }
+    }
+    return products.length ? products : null;
+  }
+
+  const handleSync = async () => {
+    setSyncStatus("loading"); setSyncMsg("");
+    try {
+      let url = sheetUrl.trim();
+      const idM = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if (idM) url = `https://docs.google.com/spreadsheets/d/${idM[1]}/pub?output=csv`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const parsed = parseCSV(text);
+      if (!parsed) throw new Error("No products found — check sheet format");
+      setProducts(parsed); setSyncStatus("ok"); setSyncMsg(`Synced ${parsed.length} products`);
+    } catch(e) { setSyncStatus("err"); setSyncMsg(e.message); }
+  };
+
+  const handlePaste = () => {
+    const parsed = parseCSV(csvPaste);
+    if (!parsed) { setSyncStatus("err"); setSyncMsg("No products found in pasted CSV"); return; }
+    setProducts(parsed); setSyncStatus("ok"); setSyncMsg(`Loaded ${parsed.length} products`);
+  };
+
+  const tableRows = (editMode ? editData : products) || products;
+  const tabs = adminMode
+    ? [["calc","Calculator"],["prices","Price Table"]]
+    : [["calc","Calculator"]];
+
+  return (
+    <div style={{fontFamily:HB, background:B, minHeight:600, paddingBottom:48}}>
+
+      {/* HEADER */}
+      <div style={{background:GR, padding:"18px 24px", display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+        <div>
+          <div style={{fontFamily:H, fontSize:26, color:"#2A3A10", letterSpacing:"0.02em"}}>COST ESTIMATOR</div>
+          <div style={{fontSize:13, color:"#4A6018", marginTop:3, fontWeight:500}}>Microbe-edible mulch film · pricing calculator</div>
+        </div>
+        {adminMode && (
+          <div style={{background:"rgba(42,58,16,0.2)", borderRadius:6, padding:"4px 10px"}}>
+            <span style={{fontFamily:H, fontSize:12, color:"#2A3A10", letterSpacing:"0.1em"}}>INTERNAL VIEW</span>
+          </div>
+        )}
+      </div>
+
+      {/* TABS — only renders if adminMode, otherwise no tab bar needed */}
+      {tabs.length > 1 && (
+        <div style={{background:BDD, display:"flex", padding:"0 24px", borderBottom:`2px solid ${BDD}`}}>
+          {tabs.map(([t,l]) => (
+            <button key={t} onClick={() => setTab(t)} style={{
+              fontFamily:H, fontSize:13, letterSpacing:"0.06em",
+              padding:"13px 18px", cursor:"pointer", border:"none",
+              borderBottom: tab===t ? `3px solid ${GR}` : "3px solid transparent",
+              background:"transparent", color: tab===t ? GR : DIM, marginBottom:-2,
+            }}>{l.toUpperCase()}</button>
+          ))}
+        </div>
+      )}
+
+      <div style={{maxWidth:"100%", margin:"0 auto", paddingTop:"28px", paddingBottom:"28px", paddingLeft:"120px", paddingRight:"120px"}}>
+
+        {/* ═══ CALCULATOR ═══ */}
+        {tab==="calc" && (
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:18}}>
+
+            {/* Selectors */}
+            <div style={card}>
+              <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18}}>
+                <div style={{fontFamily:H, fontSize:12, color:GR, letterSpacing:"0.04em"}}>SELECT PRODUCT</div>
+                <button
+                  onClick={() => { setSelWidth(""); setSelLength(""); setSelThick(""); setSelDur(""); setSelColor(""); setQty(1); }}
+                  style={{...oBtn, padding:"5px 12px", fontSize:13, letterSpacing:"0.06em"}}
+                >RESET</button>
+              </div>
+              <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:14}}>
+                {[
+                  ["Width (in)",  selWidth,  widths,  w => `${w}"`,    0],
+                  ["Thickness",   selThick,  thicks,  t => `${t} mil`, 2],
+                  ["Duration",    selDur,    durs,    d => `${d} months`, 3],
+                ].map(([lb, val, opts, render, lvl]) => (
+                  <div key={lvl}>
+                    <span style={lbl}>{lb}</span>
+                    <select style={inpStyle} value={val} onChange={e => handleSelect(lvl, e.target.value)}>
+                      <option value="" style={{background:BD, color:DIM}}>— select —</option>
+                      {opts.map(o => <option key={o} value={o} style={{background:BD, color:CREAM}}>{render(o)}</option>)}
+                    </select>
+                  </div>
+                ))}
+                <div>
+                  <span style={lbl}>Length</span>
+                  <div style={{...inpStyle, display:"flex", alignItems:"center", opacity:0.7, cursor:"default"}}>
+                    4,000'
+                  </div>
+                </div>
+                <div style={{gridColumn:"span 2"}}>
+                  <span style={lbl}>Color</span>
+                  <select
+                    style={{...inpStyle, opacity: colors.length <= 1 ? 0.5 : 1}}
+                    value={selColor}
+                    disabled={colors.length <= 1}
+                    onChange={e => setSelColor(e.target.value)}
+                  >
+                    <option value="" style={{background:BD, color:DIM}}>— any —</option>
+                    {colors.map(c => <option key={c} value={c} style={{background:BD, color:CREAM}}>{c}</option>)}
+                  </select>
+                </div>
+
+              </div>
+              {product && (
+                <div style={{marginTop:14, padding:"10px 14px", background:BDD, borderRadius:6, borderLeft:`3px solid ${GR}`}}>
+                  <div style={{fontFamily:H, fontSize:12, color:GR, letterSpacing:"0.1em", marginBottom:4}}>SELECTED SKU</div>
+                  <div style={{fontSize:12, color:CREAM, fontFamily:"monospace"}}>{product.sku}</div>
+                  <div style={{fontSize:12, color:MID, marginTop:4}}>{product.width}" × {product.length.toLocaleString()}' · {product.thick} mil · {product.dur} months · {product.color}</div>
+                </div>
+              )}
+
+              {/* Custom order note */}
+              <div style={{marginTop:14, padding:"12px 14px", borderRadius:6, border:`1px solid ${BL}`, background:"transparent"}}>
+                <div style={{fontSize:12, color:DIM, fontFamily:H, letterSpacing:"0.04em", marginBottom:10}}>COMMON ORDERS</div>
+                <div style={{display:"grid", gridTemplateColumns:"1px 1fr 1px 1fr 1px 1fr", gap:0, marginBottom:12}}>
+                  {[["SIZE","36\" – 60\""],["THICKNESS","0.5 – 1.0 mil"],["LENGTH","4,000'"]].map(([label, value], i) => (
+                    <>
+                      <div key={`div-${i}`} style={{background:BL, width:1}}></div>
+                      <div key={label} style={{textAlign:"left", padding:"0 10px"}}>
+                        <div style={{fontFamily:H, fontSize:13, color:CREAM, letterSpacing:"0.06em", marginBottom:3}}>{label}</div>
+                        <div style={{fontSize:13, color:MID}}>{value}</div>
+                      </div>
+                    </>
+                  ))}
+                </div>
+                <div style={{fontSize:13, color:MID, fontStyle:"italic"}}>
+                  Don't see what you need? We can customize further if you need something different!
+                </div>
+              </div>
+            </div>
+
+            {/* Qty + result */}
+            <div style={{display:"flex", flexDirection:"column", gap:16}}>
+              <div style={card}>
+                <div style={{fontFamily:H, fontSize:12, color:GR, marginBottom:16, letterSpacing:"0.04em"}}>QUANTITY</div>
+                <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:14}}>
+                  <button onClick={() => setQty(q => Math.max(1, (q||1)-1))} style={{...oBtn, padding:"8px 16px", fontSize:13, lineHeight:1}}>−</button>
+                  <input type="number" min="1" value={qty}
+                    onChange={e => setQty(e.target.value === "" ? "" : Math.max(1, parseInt(e.target.value) || 1))}
+                    style={{...inpStyle, width: `${Math.max(2, String(qty).length + 1.5)}ch`, textAlign:"center", fontSize:26, fontFamily:H, minWidth:48, boxSizing:"content-box"}} />
+                  <button onClick={() => setQty(q => (q||0)+1)} style={{...oBtn, padding:"8px 16px", fontSize:13, lineHeight:1}}>+</button>
+                  <span style={{fontSize:12, color:DIM, fontFamily:H, letterSpacing:"0.06em"}}>ROLLS</span>
+                </div>
+                {product && tierIdx < 3 && (() => {
+                  const next = TIERS[tierIdx + 1];
+                  const rollsNeeded = next.threshold - qty;
+                  const savingsPerRoll = product.p[tierIdx] - product.p[tierIdx + 1];
+                  const totalSavings = savingsPerRoll * next.threshold;
+                  return (
+                    <div style={{marginTop:10, padding:"9px 12px", borderRadius:6, background:"#2A3A10", display:"flex", alignItems:"center", justifyContent:"space-between", gap:8}}>
+                      <div>
+                        <div style={{fontFamily:H, fontSize:12, color:GR, letterSpacing:"0.06em", marginBottom:2}}>
+                          {rollsNeeded} MORE ROLL{rollsNeeded !== 1 ? "S" : ""} TO UNLOCK {next.short}
+                        </div>
+                        <div style={{fontSize:12, color:MID}}>
+                          Save <span style={{color:GR, fontFamily:H, fontSize:12}}>{fmt(savingsPerRoll)}/roll</span> · <span style={{color:GR, fontFamily:H, fontSize:12}}>{fmt(totalSavings)}</span> total at {next.threshold} rolls
+                        </div>
+                      </div>
+                      <div style={{flexShrink:0, fontFamily:H, fontSize:12, color:GR}}>{next.short}</div>
+                    </div>
+                  );
+                })()}
+                {qty <= 2 && (
+                  <a href="mailto:justice.read@bumiearth.com?subject=Free%20Sample%20Roll%20Request%20%E2%80%94%20b%C5%ABmigro&body=Hi%20Justice%2C%0A%0AI%E2%80%99m%20interested%20in%20requesting%20a%20free%20sample%20roll%20to%20evaluate%20b%C5%ABmigro%20for%20my%20operation.%20My%20farm%20is%20located%20in%20______.%20I%E2%80%99m%20easiest%20to%20reach%20at%20______.%0A%0AThanks%2C%0A______"
+                    style={{display:"block", textDecoration:"none", marginTop:10}}>
+                    <div style={{padding:"9px 12px", background:BDD, borderRadius:6, borderLeft:`3px solid ${MID}`, display:"flex", alignItems:"center", justifyContent:"space-between", gap:8}}>
+                      <div style={{fontSize:12, color:MID, lineHeight:1.5}}>Curious about the product? We offer <span style={{color:CREAM, fontFamily:H, fontSize:12}}>free sample rolls</span> for qualifying growers.</div>
+                      <div style={{flexShrink:0, fontSize:13, fontFamily:H, color:MID, letterSpacing:"0.06em", whiteSpace:"nowrap"}}>REQUEST →</div>
+                    </div>
+                  </a>
+                )}
+              </div>
+
+              {/* All-tier reference table — now in right column */}
+              {product && (
+                <div style={card}>
+                  <div style={{fontFamily:H, fontSize:12, color:GR, marginBottom:16, letterSpacing:"0.04em"}}>ALL PRICING TIERS</div>
+                  <table style={{width:"100%", borderCollapse:"collapse", fontSize:12}}>
+                    <thead>
+                      <tr style={{background:GR}}>
+                        {["TIER","PER ROLL","PER FT","PER LB","PER KG"].map((h, i) => (
+                          <th key={i} style={{padding:"9px 12px", fontFamily:H, fontSize:13, color:"#2A3A10", letterSpacing:"0.06em", textAlign: i===0 ? "left" : "right"}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {TIERS.map((t, i) => (
+                        <tr key={i} style={{background: tierIdx===i ? "#2A3A10" : i%2===0 ? BD : BDD}}>
+                          <td style={{padding:"10px 12px", fontFamily:H, fontSize:13, color: tierIdx===i ? GR : MID, letterSpacing:"0.04em"}}>
+                            {t.label.toUpperCase()}
+                            {tierIdx===i && <span style={{marginLeft:8, background:GR, color:"#2A3A10", borderRadius:3, padding:"1px 6px", fontSize:12}}>ACTIVE</span>}
+                          </td>
+                          <td style={{textAlign:"right", padding:"10px 10px", fontFamily:H, fontSize:13, color: tierIdx===i ? GR : CREAM}}>{fmt(product.p[i])}</td>
+                          <td style={{textAlign:"right", padding:"10px 10px", fontSize:13, color:MID}}>{fmtN(product.ft[i])}</td>
+                          <td style={{textAlign:"right", padding:"10px 10px", fontSize:13, color:MID}}>{fmtN(product.lb[i])}</td>
+                          <td style={{textAlign:"right", padding:"10px 10px", fontSize:13, color:MID}}>{fmtN(product.kg[i])}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {!product && (
+                <div style={{...card, display:"flex", alignItems:"center", justifyContent:"center", minHeight:160}}>
+                  <div style={{textAlign:"center", padding:"0 16px"}}>
+                    <div style={{fontSize:12, color:DIM, fontFamily:H, letterSpacing:"0.1em"}}>SELECT A PRODUCT ABOVE</div>
+                    <div style={{fontSize:12, color:DIM, fontFamily:H, letterSpacing:"0.1em", marginTop:4}}>TO SEE PRICING</div>
+                    <div style={{width:32, height:1, background:BL, margin:"14px auto"}}></div>
+                    <div style={{fontSize:13, color:MID, lineHeight:1.6}}>
+                      Once you build your estimate, you can compare it against your current conventional plastic mulch costs — including removal labor and disposal fees.
+                    </div>
+                    <div style={{fontFamily:H, fontSize:13, color:GR, letterSpacing:"0.06em", marginTop:10}}>
+                      COST COMPARISON AVAILABLE BELOW
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── ESTIMATE — full width hero ── */}
+            {product && (
+              <div style={{gridColumn:"span 2", background:BDD, borderRadius:12, border:`1px solid ${BDD}`, overflow:"hidden"}}>
+                <div style={{background:BD, padding:"14px 24px"}}>
+                  <div style={{fontFamily:H, fontSize:12, color:GR, letterSpacing:"0.06em"}}>YOUR ESTIMATE</div>
+                </div>
+                <div style={{padding:"28px 24px"}}>
+                  {/* Big numbers */}
+                  <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:16, marginBottom:24}}>
+                    <div style={{background:BD, borderRadius:10, padding:"20px", textAlign:"center"}}>
+                      <div style={{fontSize:13, color:DIM, fontFamily:H, letterSpacing:"0.08em", marginBottom:8}}>UNIT PRICE</div>
+                      <div style={{fontSize:42, fontFamily:H, color:CREAM, lineHeight:1}}>{fmt(unitPrice)}</div>
+                      <div style={{fontSize:12, color:DIM, marginTop:6}}>per roll</div>
+                    </div>
+                    <div style={{background:"#2A3A10", borderRadius:10, padding:"20px", textAlign:"center", border:`2px solid ${GR}`}}>
+                      <div style={{fontSize:13, color:GR, fontFamily:H, letterSpacing:"0.08em", marginBottom:8}}>ORDER TOTAL</div>
+                      <div style={{fontSize:48, fontFamily:H, color:GR, lineHeight:1}}>{fmt(total)}</div>
+                      <div style={{fontSize:12, color:MID, marginTop:6}}>{qty} roll{qty!==1?"s":""} · {TIERS[tierIdx].short}</div>
+                    </div>
+                    <div style={{background:BD, borderRadius:10, padding:"20px", textAlign:"center"}}>
+                      <div style={{fontSize:13, color:DIM, fontFamily:H, letterSpacing:"0.08em", marginBottom:8}}>UNIT RATE</div>
+                      <div style={{display:"flex", flexDirection:"column", gap:6, marginTop:4}}>
+                        {[["FT", fmtN(product.ft[tierIdx])],["LB", fmtN(product.lb[tierIdx])],["KG", fmtN(product.kg[tierIdx])]].map(([l,v])=>(
+                          <div key={l} style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+                            <span style={{fontSize:13, color:DIM, fontFamily:H, letterSpacing:"0.06em"}}>PER {l}</span>
+                            <span style={{fontSize:13, fontFamily:H, color:CREAM}}>{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+
+
+                  <a
+                    href={`mailto:justice.read@bumiearth.com?subject=Content%20Partnership%20Inquiry%20%E2%80%94%20b%C5%ABmigro%20Discount&body=Hi%20Justice%2C%0A%0AI%E2%80%99m%20interested%20in%20learning%20more%20about%20the%20content%20partnership%20discount.%20My%20farm%20is%20located%20in%20______.%20We%20grow%20______%20and%20would%20love%20to%20discuss%20how%20we%20can%20be%20involved.%20I%E2%80%99m%20easiest%20to%20reach%20at%20______.%0A%0AThanks%2C%0A______`}
+                    style={{display:"block", textDecoration:"none"}}
+                  >
+                    <div style={{padding:"14px 18px", background:"#2A3A10", borderRadius:8, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12}}>
+                      <div>
+                        <div style={{fontFamily:H, fontSize:12, color:GR, letterSpacing:"0.08em", marginBottom:4}}>ADDITIONAL DISCOUNTS AVAILABLE</div>
+                        <div style={{fontSize:13, color:MID, lineHeight:1.5}}>Growers willing to allow us to capture on-farm content may qualify for additional discounts.</div>
+                      </div>
+                      <div style={{flexShrink:0, background:GR, color:"#2A3A10", fontFamily:H, fontSize:13, letterSpacing:"0.06em", padding:"10px 16px", borderRadius:6, whiteSpace:"nowrap"}}>GET IN TOUCH</div>
+                    </div>
+                  </a>
+                </div>
+              </div>
+            )}
+
+            {/* Cost Comparison button */}
+            {product && (
+              <div style={{gridColumn:"span 2", textAlign:"center", marginTop:4}}>
+                <button
+                  onClick={() => setShowComparison(s => !s)}
+                  style={{...gBtn, padding:"12px 32px", fontSize:12, letterSpacing:"0.06em"}}
+                >
+                  {showComparison ? "HIDE COST COMPARISON" : "COST COMPARISON"}
+                </button>
+              </div>
+            )}
+
+            {/* Cost Comparison panel */}
+            {product && showComparison && (
+              <div style={{...card, gridColumn:"span 2", marginTop:4}}>
+                <div style={{fontFamily:H, fontSize:12, color:GR, marginBottom:4, letterSpacing:"0.04em"}}>COST COMPARISON</div>
+                <div style={{fontSize:13, color:MID, marginBottom:20, lineHeight:1.6}}>
+                  Enter your current conventional plastic mulch costs below. We'll compare the total against your būmigro estimate.
+                </div>
+
+                {/* Inputs */}
+                <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:24}}>
+                  {[
+                    ["Current mulch cost per roll ($)", convMulchCost, setConvMulchCost, "e.g. $180 per roll"],
+                    ["Number of rolls used per acre",    convLaborHrs,  setConvLaborHrs,  selWidth==="36" ? "e.g. 3.2 rolls per acre" : selWidth==="48" ? "e.g. 2.7 rolls per acre" : selWidth==="60" ? "e.g. 2.2 rolls per acre" : "e.g. 2.7 rolls per acre"],
+                    ["Plastic removal labor cost per acre", convLaborRate, setConvLaborRate, "e.g. $250 per acre"],
+                    ["Plastic disposal / hauling cost per acre", convDisposal,  setConvDisposal,  "e.g. $300 per acre"],
+                  ].map(([lb, val, setter, ph]) => (
+                    <div key={lb}>
+                      <div style={{display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:4}}>
+                        <span style={lbl}>{lb.toUpperCase()}</span>
+                        {lb === "Number of rolls used per acre" && (
+                          <span style={{fontSize:10, color:DIM, fontStyle:"italic"}}>Standard būmigro roll is 4,000 ft</span>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={val} placeholder={ph}
+                        onChange={e => {
+                          const v = e.target.value.replace(/[^0-9.]/g, "");
+                          setter(v);
+                          setCompCalculated(false);
+                        }}
+                        className="bumi-input"
+                        style={{...inpStyle, fontSize:12}}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Calculate button */}
+                <div style={{textAlign:"center", marginBottom:20}}>
+                  <button
+                    onClick={() => setShowModal(true)}
+                    style={{...gBtn, padding:"12px 40px", fontSize:15, letterSpacing:"0.08em"}}
+                  >
+                    CALCULATE
+                  </button>
+                </div>
+
+                {/* Modal */}
+                {showModal && (
+                  <div style={{position:"fixed", top:0, left:0, right:0, bottom:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000}}>
+                    <div style={{background:BD, borderRadius:12, border:`1px solid ${BDD}`, padding:"32px", width:"100%", maxWidth:480, margin:"20px"}}>
+                      <div style={{fontFamily:H, fontSize:16, color:GR, letterSpacing:"0.04em", marginBottom:8}}>GET YOUR RESULTS</div>
+                      <div style={{fontSize:13, color:MID, marginBottom:24, lineHeight:1.6}}>
+                        Enter your details below and we'll send a snapshot of your cost comparison results directly to you.
+                      </div>
+                      <div style={{display:"flex", flexDirection:"column", gap:14}}>
+                        <div>
+                          <span style={lbl}>NAME</span>
+                          <input type="text" value={modalName} onChange={e=>setModalName(e.target.value)} placeholder="Your name" style={{...inpStyle, fontSize:13}} className="bumi-input" />
+                        </div>
+                        <div>
+                          <span style={lbl}>EMAIL</span>
+                          <input type="email" value={modalEmail} onChange={e=>setModalEmail(e.target.value)} placeholder="your@email.com" style={{...inpStyle, fontSize:13}} className="bumi-input" />
+                        </div>
+                        <div>
+                          <span style={lbl}>PHONE NUMBER</span>
+                          <input type="tel" value={modalPhone} onChange={e=>setModalPhone(e.target.value)} placeholder="(555) 555-5555" style={{...inpStyle, fontSize:13}} className="bumi-input" />
+                        </div>
+                      </div>
+                      <div style={{display:"flex", gap:10, marginTop:24}}>
+                        <button onClick={()=>setShowModal(false)} style={{...oBtn, flex:1}}>CANCEL</button>
+                        <button
+                        onClick={async ()=>{
+                            const mulch    = parseFloat(convMulchCost)||0;
+                            const rolls    = parseFloat(convLaborHrs)||0;
+                            const removal  = parseFloat(convLaborRate)||0;
+                            const disposal = parseFloat(convDisposal)||0;
+                            const convMulchAcre = mulch * rolls;
+                            const convTotal = convMulchAcre + removal + disposal;
+                            const bumiTotal = unitPrice * rolls;
+                            const savings   = convTotal - bumiTotal;
+
+                            if (!modalName || !modalEmail) {
+                              alert("Please enter your name and email before continuing.");
+                              return;
+                            }
+
+                            const message = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#88674F;padding:0;border-radius:12px;overflow:hidden;"><div style="background:#A2D45E;padding:20px 24px;"><h1 style="font-family:Georgia,serif;font-size:22px;color:#2A3A10;margin:0;">bumigro Cost Comparison</h1><p style="color:#4A6018;margin:4px 0 0;font-size:13px;">Microbe-edible mulch film pricing calculator</p></div><div style="padding:24px;"><div style="background:#6B5040;border-radius:8px;padding:16px;margin-bottom:16px;"><h3 style="color:#A2D45E;font-size:13px;margin:0 0 10px;">CONTACT INFO</h3><p style="color:#F5EDE0;margin:4px 0;font-size:13px;"><strong>Name:</strong> ${modalName}</p><p style="color:#F5EDE0;margin:4px 0;font-size:13px;"><strong>Email:</strong> ${modalEmail}</p><p style="color:#F5EDE0;margin:4px 0;font-size:13px;"><strong>Phone:</strong> ${modalPhone}</p></div><div style="background:#6B5040;border-radius:8px;padding:16px;margin-bottom:16px;"><h3 style="color:#A2D45E;font-size:13px;margin:0 0 10px;">SELECTED PRODUCT</h3><p style="color:#F5EDE0;margin:4px 0;font-size:13px;"><strong>SKU:</strong> ${product?.sku||"N/A"}</p><p style="color:#F5EDE0;margin:4px 0;font-size:13px;"><strong>Quantity:</strong> ${qty} rolls at $${unitPrice.toFixed(2)}/roll</p></div><table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;"><tr><td width="48%" valign="top" style="background:#5A4133;border-radius:8px;padding:0;"><div style="background:#F5EDE0;padding:10px 14px;border-radius:8px 8px 0 0;"><strong style="color:#6B5040;font-size:12px;">CONVENTIONAL PLASTIC</strong></div><div style="padding:14px;"><p style="color:#D4B898;margin:4px 0;font-size:12px;">Mulch cost/acre: <strong style="color:#F5EDE0;">$${convMulchAcre.toFixed(2)}</strong></p><p style="color:#D4B898;margin:4px 0;font-size:12px;">Removal labor/acre: <strong style="color:#F5EDE0;">$${removal.toFixed(2)}</strong></p><p style="color:#D4B898;margin:4px 0;font-size:12px;">Disposal/acre: <strong style="color:#F5EDE0;">$${disposal.toFixed(2)}</strong></p><p style="color:#F5EDE0;margin:8px 0 0;font-size:13px;font-weight:bold;border-top:1px solid #88674F;padding-top:8px;">Total/acre: $${convTotal.toFixed(2)}</p></div></td><td width="4%"></td><td width="48%" valign="top" style="background:#5A4133;border-radius:8px;padding:0;"><div style="background:#A2D45E;padding:10px 14px;border-radius:8px 8px 0 0;"><strong style="color:#2A3A10;font-size:12px;">BUMIGRO MICROBE-EDIBLE</strong></div><div style="padding:14px;"><p style="color:#D4B898;margin:4px 0;font-size:12px;">Mulch cost/acre: <strong style="color:#F5EDE0;">$${bumiTotal.toFixed(2)}</strong></p><p style="color:#D4B898;margin:4px 0;font-size:12px;">Removal labor/acre: <strong style="color:#A2D45E;">$0.00</strong></p><p style="color:#D4B898;margin:4px 0;font-size:12px;">Disposal/acre: <strong style="color:#A2D45E;">$0.00</strong></p><p style="color:#A2D45E;margin:8px 0 0;font-size:13px;font-weight:bold;border-top:1px solid #88674F;padding-top:8px;">Total/acre: $${bumiTotal.toFixed(2)}</p></div></td></tr></table><div style="background:#2A3A10;border:2px solid #A2D45E;border-radius:8px;padding:20px;text-align:center;"><p style="color:#A2D45E;font-size:12px;margin:0 0 8px;">ESTIMATED SAVINGS PER ACRE WITH BUMIGRO</p><p style="color:#A2D45E;font-size:36px;font-weight:bold;margin:0;">$${savings.toFixed(2)}</p></div><p style="color:#D4B898;font-size:11px;text-align:center;margin-top:16px;">Generated by the bumigro Cost Estimator - www.bumigro.com</p></div></div>`;
+
+                            // Show results immediately regardless of email status
+                            setShowModal(false);
+                            setCompCalculated(true);
+
+                            // Send email in background
+                            emailjs.send("service_a7zaqnj", "template_1ae36c4", {
+                              from_name:  modalName,
+                              from_email: modalEmail,
+                              phone:      modalPhone,
+                              message:    message,
+                            }).catch(err => console.warn("EmailJS:", err));
+                          }}
+                          style={{...gBtn, flex:2}}
+                        >
+                          SEE MY RESULTS
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Comparison output */}
+                {compCalculated && (() => {
+                  const mulch           = parseFloat(convMulchCost)  || 0;
+                  const rollsPerAcre    = parseFloat(convLaborHrs)   || 0;
+                  const removalPerAcre  = parseFloat(convLaborRate)  || 0;
+                  const disposalPerAcre = parseFloat(convDisposal)   || 0;
+                  const mulchPerAcre    = mulch * rollsPerAcre;
+                  const convPerAcre     = mulchPerAcre + removalPerAcre + disposalPerAcre;
+                  const bumiPerAcre     = unitPrice * rollsPerAcre;
+                  const diff            = convPerAcre - bumiPerAcre;
+                  const hasData         = convPerAcre > 0;
+
+                  return (
+                    <div>
+                      {/* Side by side */}
+                      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16}}>
+                        {/* Conventional */}
+                        <div style={{background:BDD, borderRadius:8, overflow:"hidden"}}>
+                          <div style={{background:CREAM, padding:"10px 14px", fontFamily:H, fontSize:13, color:BD, letterSpacing:"0.08em"}}>CONVENTIONAL PLASTIC</div>
+                          <div style={{padding:"14px"}}>
+                            <div style={{display:"flex", justifyContent:"space-between", marginBottom:8, fontSize:13}}>
+                              <span style={{color:DIM}}>Mulch cost per acre</span>
+                              <span style={{color:CREAM, fontFamily:H, fontSize:13}}>{mulchPerAcre > 0 ? fmt(mulchPerAcre) : "—"}</span>
+                            </div>
+                            <div style={{display:"flex", justifyContent:"space-between", marginBottom:8, fontSize:13}}>
+                              <span style={{color:DIM}}>Plastic removal labor per acre</span>
+                              <span style={{color:CREAM, fontFamily:H, fontSize:13}}>{removalPerAcre > 0 ? fmt(removalPerAcre) : "—"}</span>
+                            </div>
+                            <div style={{display:"flex", justifyContent:"space-between", marginBottom:12, fontSize:13}}>
+                              <span style={{color:DIM}}>Plastic disposal / hauling per acre</span>
+                              <span style={{color:CREAM, fontFamily:H, fontSize:13}}>{disposalPerAcre > 0 ? fmt(disposalPerAcre) : "—"}</span>
+                            </div>
+                            <div style={{borderTop:`1px solid ${BDD}`, paddingTop:10}}>
+                              <div style={{display:"flex", justifyContent:"space-between"}}>
+                                <span style={{color:MID, fontFamily:H, fontSize:13, letterSpacing:"0.04em"}}>TOTAL COST PER ACRE</span>
+                                <span style={{color:CREAM, fontFamily:H, fontSize:13}}>{hasData ? fmt(convPerAcre) : "—"}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Bumigro */}
+                        <div style={{background:BDD, borderRadius:8, overflow:"hidden"}}>
+                          <div style={{background:GR, padding:"10px 14px", fontFamily:H, fontSize:13, color:"#2A3A10", letterSpacing:"0.08em"}}>BŪMIGRO MICROBE-EDIBLE</div>
+                          <div style={{padding:"14px"}}>
+                            <div style={{display:"flex", justifyContent:"space-between", marginBottom:8, fontSize:13}}>
+                              <span style={{color:DIM}}>Mulch cost per acre</span>
+                              <span style={{color:CREAM, fontFamily:H, fontSize:13}}>{rollsPerAcre > 0 ? fmt(bumiPerAcre) : "—"}</span>
+                            </div>
+                            <div style={{display:"flex", justifyContent:"space-between", marginBottom:8, fontSize:13}}>
+                              <span style={{color:DIM}}>Removal labor per acre</span>
+                              <span style={{color:GR, fontFamily:H, fontSize:13}}>$0.00</span>
+                            </div>
+                            <div style={{display:"flex", justifyContent:"space-between", marginBottom:12, fontSize:13}}>
+                              <span style={{color:DIM}}>Disposal / hauling per acre</span>
+                              <span style={{color:GR, fontFamily:H, fontSize:13}}>$0.00</span>
+                            </div>
+                            <div style={{borderTop:`1px solid ${BDD}`, paddingTop:10}}>
+                              <div style={{display:"flex", justifyContent:"space-between"}}>
+                                <span style={{color:MID, fontFamily:H, fontSize:13, letterSpacing:"0.04em"}}>TOTAL COST PER ACRE</span>
+                                <span style={{color:GR, fontFamily:H, fontSize:13}}>{rollsPerAcre > 0 ? fmt(bumiPerAcre) : "—"}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Delta callout */}
+                      {hasData && (
+                        <div style={{
+                          padding:"28px 24px", borderRadius:8, textAlign:"center",
+                          background: diff > 0 ? "#2A3A10" : BDD,
+                          border: diff > 0 ? `2px solid ${GR}` : `1px solid ${BDD}`,
+                        }}>
+                          {diff > 0 ? (
+                            <>
+                              <div style={{fontFamily:H, fontSize:13, color:GR, letterSpacing:"0.12em", marginBottom:12}}>ESTIMATED SAVINGS PER ACRE WITH BŪMIGRO</div>
+                              <div style={{fontFamily:H, fontSize:60, color:GR, lineHeight:1}}>{fmt(diff)}</div>
+                              <div style={{width:48, height:2, background:GR, margin:"16px auto 0", borderRadius:2}}></div>
+                            </>
+                          ) : (
+                            <>
+                              <div style={{fontFamily:H, fontSize:12, color:MID, letterSpacing:"0.08em", marginBottom:8}}>ENTER YOUR CURRENT COSTS ABOVE TO SEE YOUR SAVINGS PER ACRE</div>
+                              <div style={{fontSize:13, color:DIM}}>būmigro eliminates removal labor and disposal fees entirely.</div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══ PRICE TABLE (admin only) ═══ */}
+        {tab==="prices" && adminMode && (
+          <div>
+            <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16}}>
+              <div style={{fontFamily:H, fontSize:13, color: editMode ? GR : DIM, letterSpacing:"0.08em"}}>
+                {editMode ? "EDIT MODE — CLICK SAVE WHEN DONE" : `${products.length} PRODUCTS`}
+              </div>
+              <div style={{display:"flex", gap:8}}>
+                {editMode ? (
+                  <>
+                    <button onClick={cancelEdit} style={oBtn}>CANCEL</button>
+                    <button onClick={saveEdit} style={gBtn}>SAVE CHANGES</button>
+                  </>
+                ) : (
+                  <button onClick={startEdit} style={oBtn}>EDIT PRICES</button>
+                )}
+              </div>
+            </div>
+            <div style={{...card, padding:0, overflow:"auto"}}>
+              <table style={{width:"100%", borderCollapse:"collapse", fontSize:13}}>
+                <thead>
+                  <tr style={{background:GR, position:"sticky", top:0}}>
+                    {["SKU","Size","Mil","Mo", ...TIERS.map(t => t.short)].map((h, i) => (
+                      <th key={i} style={{padding:"10px 10px", fontFamily:H, fontSize:12, color:"#2A3A10", letterSpacing:"0.06em", whiteSpace:"nowrap", textAlign: i<4 ? "left" : "right", borderLeft: i>=4 ? `1px solid rgba(42,58,16,0.2)` : "none"}}>{h.toUpperCase()}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tableRows.map((p, ri) => (
+                    <tr key={p.sku} style={{borderTop:`1px solid ${BDD}`, background: ri%2===0 ? BD : BDD}}>
+                      <td style={{padding:"8px 10px", fontFamily:"monospace", fontSize:13, color:DIM, whiteSpace:"nowrap"}}>{p.sku}</td>
+                      <td style={{padding:"8px", color:MID, whiteSpace:"nowrap"}}>{p.width}"×{p.length.toLocaleString()}'</td>
+                      <td style={{padding:"8px", color:MID}}>{p.thick}</td>
+                      <td style={{padding:"8px", color:MID}}>{p.dur}</td>
+                      {p.p.map((price, ti) => (
+                        <td key={ti} style={{textAlign:"right", padding:"6px 8px", borderLeft:`1px solid ${BDD}`}}>
+                          {editMode
+                            ? <input type="number" step="0.01"
+                                value={editData.find(x => x.sku===p.sku)?.p[ti] ?? price}
+                                onChange={e => cellEdit(p.sku, "p", ti, e.target.value)}
+                                style={{...inpStyle, width:72, fontSize:12, padding:"4px 6px", textAlign:"right"}} />
+                            : <span style={{fontFamily:H, fontSize:12, color: ti===0 ? CREAM : GR}}>{fmt(price)}</span>
+                          }
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{fontSize:13, color:DIM, marginTop:8, fontFamily:H, letterSpacing:"0.04em"}}>SHOWING MSRP · 10% · 20% · 30% DISCOUNT TIERS PER ROLL</div>
+          </div>
+        )}
+      </div>
+
+    </div>
+  );
+}
+
+    document.getElementById('loading').style.display = 'none';
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<BumigroCalculator adminMode={true} />);
+  </script>
+</body>
+</html>
